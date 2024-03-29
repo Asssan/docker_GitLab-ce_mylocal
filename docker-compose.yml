@@ -1,0 +1,130 @@
+version: "3"
+
+networks:
+  # GitLab用ネットワーク
+  gitlab-network: 
+    name: gitlab-network
+    driver: bridge
+    ipam:
+     driver: default
+     config:
+       - subnet: 172.20.0.0/24
+
+volumes:
+  # GitLab用ディレクトリ名
+  gitlab-config:
+    name: gitlab-config
+  gitlab-logs:
+    name: gitlab-logs
+  gitlab-data:
+    name: gitlab-data
+  # GitLab Runner用ディレクトリ名
+  gitlab-runner:
+    name: gitlab-runner
+  # redmine用ディレクトリ名
+  redmine-mythemes:
+    name: redmine-mythemes
+  redmine-plugins:
+    name: redmine-plugins
+  redmine-themes:
+    name: redmine-themes
+  # redmine DB用ディレクトリ名
+  mysql:
+    name: mysql
+
+services:
+  # GitLab用コンテナ
+  gitlab-ce:
+    container_name: gitlab-ce
+    # image: 'gitlab/gitlab-ce:latest'
+    build:
+      context: ./dckf_gitlab-ce
+    restart: always
+    hostname: 'gitlab.local'
+    ### 設定できない場合は、下記の設定をgitlab.rbに追加設定する
+    # environment:
+    #   GITLAB_OMNIBUS_CONFIG: |
+    #     nginx['listen_port'] = 80
+    #     external_url 'http://gitlab.local:8080'
+    #     gitlab_rails['gitlab_shell_ssh_port'] = 2222
+    ### Git LFS(Large File Storage)100MB以上のファイルをコミットする場合に追加設定する
+    #     gitlab_rails['lfs_enabled'] = true
+    #     gitlab_rails['lfs_storage_path'] = "/var/opt/gitlab/gitlab-rails/shared/lfs-objects"
+    ### rack_attackになる場合、見直して設定する
+    ## gitlab_rails['rack_attack_git_basic_auth'] = {
+    ##   'enabled' => false,
+    ##   'ip_whitelist' => ["127.0.0.1",192.168.0.5],
+    ##   'maxretry' => 10,
+    ##   'findtime' => 60,
+    ##   'bantime' => 3600
+    ## }
+    ports:
+      - '8080:80'
+      # - '8443:443'
+      - '2222:22'
+    volumes:
+     - gitlab-config:/etc/gitlab
+     - gitlab-logs:/var/log/gitlab
+     - gitlab-data:/var/opt/gitlab
+    # shm_size: '10gb'
+    networks:
+      gitlab-network:
+        ipv4_address: 172.20.0.2
+
+  # GitLab Runner用コンテナ
+  runner:
+    container_name: gitlab-runner
+    # image: gitlab/gitlab-runner:latest    
+    build:
+      context: ./dckf_gitlab-runner
+    restart: always
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - gitlab-runner:/etc/gitlab-runner
+    networks:
+      gitlab-network:
+        ipv4_address: 172.20.0.3
+
+  # Redmime用コンテナ
+  redmine:
+    container_name: redmine
+    # image: redmine:latest
+    build:
+      context: ./dckf_redmine
+    restart: always
+    ports:
+      - 8081:3000
+    environment:
+      TZ: Asia/Tokyo
+      REDMINE_DB_MYSQL: mysql
+      REDMINE_DB_DATABASE: redmine
+      REDMINE_DB_USERNAME: redmine_user
+      REDMINE_DB_PASSWORD: redmine_password
+      REDMINE_DB_ENCODING: utf8mb4
+    volumes:
+      - redmine-mythemes:/usr/src/redmine/public/themes/mytheme
+      - redmine-plugins:/usr/src/redmine/plugins
+      - redmine-themes:/usr/src/redmine/public/themes
+    networks:
+      gitlab-network:
+        ipv4_address: 172.20.0.4
+
+  # Redmime用DB
+  mysql:
+    container_name: mysql
+    # image: mysql:8.0
+    build:
+      context: ./dckf_mysql
+    restart: always
+    environment:
+      TZ: Asia/Tokyo
+      MYSQL_ROOT_PASSWORD: redmine_password
+      MYSQL_DATABASE: redmine
+      MYSQL_USER: redmine_user
+      MYSQL_PASSWORD: redmine_password
+    command: mysqld --character-set-server=utf8mb4 --collation-server=utf8mb4_bin
+    volumes:
+      - mysql:/var/lib/mysql
+    networks:
+      gitlab-network:
+        ipv4_address: 172.20.0.5
